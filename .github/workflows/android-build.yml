@@ -1,11 +1,9 @@
 
-name: ABS Full ZIP APK Build
+name: Android APK Build
 
 on:
   push:
-    paths:
-      - '**.zip'
-      - '.github/workflows/android-build.yml'
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -15,35 +13,43 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Find and extract Android ZIP
+      - name: Find and extract project ZIP
         shell: bash
         run: |
-          set -e
-          ZIP_FILE=$(find . -maxdepth 1 -type f -name '*.zip' | head -n 1)
+          set -euo pipefail
+
+          ZIP_FILE="$(find . -maxdepth 1 -type f -iname '*.zip' -print -quit)"
 
           if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: No ZIP file found in repository root"
+            echo "ERROR: Repository root-la ZIP file kidaikkala."
             exit 1
           fi
 
           mkdir -p "$RUNNER_TEMP/android-project"
           unzip -q "$ZIP_FILE" -d "$RUNNER_TEMP/android-project"
 
-          PROJECT_DIR=$(find "$RUNNER_TEMP/android-project" \
+          SETTINGS_FILE="$(find "$RUNNER_TEMP/android-project" \
             -type f \( -name settings.gradle -o -name settings.gradle.kts \) \
-            -printf '%h\n' | head -n 1)
+            -print -quit)"
 
-          if [ -z "$PROJECT_DIR" ]; then
-            echo "ERROR: Android Gradle project not found inside ZIP"
+          if [ -z "$SETTINGS_FILE" ]; then
+            echo "ERROR: ZIP-la settings.gradle file kidaikkala."
             exit 1
           fi
 
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Found project: $PROJECT_DIR"
+          PROJECT_ROOT="$(dirname "$SETTINGS_FILE")"
+          echo "PROJECT_ROOT=$PROJECT_ROOT" >> "$GITHUB_ENV"
+
+          echo "Android project found: $PROJECT_ROOT"
+          ls -la "$PROJECT_ROOT"
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -51,23 +57,60 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Build Debug APK
-        working-directory: ${{ env.PROJECT_DIR }}
+      - name: Install Android SDK packages
+        shell: bash
         run: |
-          chmod +x gradlew 2>/dev/null || true
-          if [ -f gradlew ]; then
-            ./gradlew --no-daemon assembleDebug
-          else
-            echo "Gradle wrapper missing; cannot safely select Gradle version."
+          set -euo pipefail
+
+          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" \
+            -type f -name sdkmanager -print -quit)"
+
+          if [ -z "$SDKMANAGER" ]; then
+            echo "ERROR: Android sdkmanager kidaikkala."
             exit 1
           fi
 
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+
+          COMPILE_SDK="$(grep -RhoE \
+            'compileSdk(Version)?[[:space:]]*(=)?[[:space:]]*[0-9]+' \
+            "$PROJECT_ROOT" \
+            --include='build.gradle' \
+            --include='build.gradle.kts' \
+            --exclude-dir=build \
+            --exclude-dir=.gradle \
+            | grep -oE '[0-9]+' | head -n1 || true)"
+
+          if [ -z "$COMPILE_SDK" ]; then
+            COMPILE_SDK=35
+            echo "compileSdk detect panna mudiyala; Android 35 use pannrom."
+          fi
+
+          echo "Using Android platform: $COMPILE_SDK"
+
+          "$SDKMANAGER" --install \
+            "platform-tools" \
+            "platforms;android-$COMPILE_SDK"
+
+      - name: Build debug APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PROJECT_ROOT"
+
+          if [ ! -f gradlew ]; then
+            echo "ERROR: Project-la gradlew wrapper file kidaikkala."
+            exit 1
+          fi
+
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleDebug
+
       - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: ABS-Free-Out-APK
-          path: ${{ env.PROJECT_DIR }}/**/build/outputs/apk/debug/*.apk
+          name: Android-Debug-APK
+          path: |
+            ${{ env.PROJECT_ROOT }}/**/build/outputs/apk/debug/*.apk
           if-no-files-found: error
