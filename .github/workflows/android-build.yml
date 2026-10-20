@@ -1,3 +1,4 @@
+
 name: Android Free Out Build
 
 on:
@@ -16,6 +17,9 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
 
+      - name: Unpack Android project ZIP
+        run: unzip -q ABS-Free-Out-Android-GitHub-Build.zip -d android-free-out
+
       - name: Set up Java
         uses: actions/setup-java@v6
         with:
@@ -25,17 +29,15 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
 
+      - name: Install Android build tools
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: '8.7'
           cache-provider: basic
-
-      - name: Unpack Android project ZIP
-        run: unzip -q ABS-Free-Out-Android-GitHub-Build.zip -d android-free-out
-
-      - name: Install Android build tools
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+          cache-disabled: true
 
       - name: Build APK
         working-directory: android-free-out
